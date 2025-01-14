@@ -82,21 +82,21 @@ class BinaryDatasetCreator:
         y = np.array(labels, dtype=np.int32)
         return x, y
 
-    def save_binary_files(self, output_dir):
+    def save_binary_files(self, output_Label_mapping_dir):
         """
         Speichert die Bilder und Labels als .npy-Dateien.
 
         Args:
             output_dir (str): Zielverzeichnis für die .npy-Dateien.
         """
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
+        if not os.path.exists(output_Label_mapping_dir):
+            os.makedirs(output_Label_mapping_dir)
 
         x, y = self.process_images()
 
-        x_filepath = os.path.join(output_dir, "x.npy")
-        y_filepath = os.path.join(output_dir, "y.npy")
-        mapping_filepath = os.path.join(output_dir, "label_mapping.json")
+        x_filepath = os.path.join(output_Label_mapping_dir, "x.npy")
+        y_filepath = os.path.join(output_Label_mapping_dir, "y.npy")
+        mapping_filepath = os.path.join(output_Label_mapping_dir, "label_mapping.json")
 
         # Speichere die verarbeiteten Daten
         np.save(x_filepath, x)

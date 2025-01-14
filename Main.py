@@ -4,7 +4,8 @@ import cv2
 import json
 import os
 import numpy as np
-import BinaryDatasetCreator
+from trainmulticlassmodel import train_multiclass_model
+
 from CustomGraphicsScene import CustomGraphicsScene
 from CustomTitleBar import CustomTitleBar
 from GraphicsView import GraphicsView
@@ -28,6 +29,8 @@ from keras.layers import (
 from keras.optimizers import Adam, SGD
 from keras.initializers import HeNormal
 from keras.utils import to_categorical
+from skimage import transform
+from keras.activations import relu
 
 
 class ImageViewerApp(QMainWindow):
@@ -50,22 +53,14 @@ class ImageViewerApp(QMainWindow):
         # Benutzerdefinierte Titelleiste hinzufügen
         self.title_bar = CustomTitleBar(self)
         self.layout.addWidget(self.title_bar)
-
-        # Hauptinhalt (Dummy-Widget hier für die Demonstration)
-       # self.main_content = QLabel("Hauptinhalt", self)
-        #self.main_content.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        #self.main_content.setStyleSheet("background-color: #1f1f1f; color: white; font-size: 18px;")
-        #self.layout.addWidget(self.main_content)
-
         self.setCentralWidget(self.central_widget)
 
         # Pfade und Parameter
         self.json_file_path = "./Labels/labels.json" # Pfad zur JSON-Datei mit Labels
-        self.image_size = (512, 512)  # Größe der Bilder für das Modell
-        self.image_size_One = 512  # Größe der Bilder für das Modell
+        self.input_shape = (64, 64, 3)
         self.batch_size = 128  # Batch-Größe
         self.num_epochs = 100  # Anzahl der Epoche
-        self.output_file_path = "./Datasets./dataset.npz"
+        self.output_Dataset_file_path = "./Datasets"
         self.test_size = 0.2
         self.validation_split = 0.5  # Anteil der Validierungsdaten aus dem temporären Datensatz
 
@@ -92,12 +87,12 @@ class ImageViewerApp(QMainWindow):
         self.image_id_counter = 1
         self.annotation_id_counter = 1
         self.coco_data = self.create_coco_structure()
-        self.num_classes = None
+        self.num_classes = 2
+        self.output_predictions_path = "./Predictions./predictions.json"
+        self.label_mapping_path = "./Labeles_Mapping"
+        self.output_Model_path="./Models"
 
         # UI-Komponenten
-       # self.central_widget = QWidget()
-        #self.setCentralWidget(self.central_widget)
-
         self.Main_layout = QHBoxLayout()
 
         # Linke Bildliste
@@ -126,8 +121,8 @@ class ImageViewerApp(QMainWindow):
         self.label_save_button = QPushButton("Label speichern")
         self.label_export_button = QPushButton("Labels exportieren")
         self.import_Model_button = QPushButton("Model laden")
-        self.dataset_creat_button = QPushButton("Modell trainieren")
-        self.train_dataset = QPushButton("Modell testen")
+        self.train_dataset = QPushButton("Modell trainieren")
+        self.test_dataset = QPushButton("Modell testen")
 
         # 1. Bildoptionen
         self.image_group = QGroupBox("Bild")
@@ -208,9 +203,9 @@ class ImageViewerApp(QMainWindow):
         # 4. trainobtion
         self.train_group = QGroupBox("Modell")
         self.train_layout = QVBoxLayout()
-        self.train_layout.addWidget(self.dataset_creat_button)
-        self.train_layout.addWidget(self.import_Model_button)
         self.train_layout.addWidget(self.train_dataset)
+        self.train_layout.addWidget(self.import_Model_button)
+        self.train_layout.addWidget(self.test_dataset)
         self.train_group.setLayout(self.train_layout)
         self.train_grid_layout = QGridLayout()
         self.train_grid_layout.addWidget(self.train_group, 0, 0)  # Bildoptionen links oben
@@ -253,9 +248,9 @@ class ImageViewerApp(QMainWindow):
         self.invert_button.clicked.connect(self.invert_and_show_mask)  # Verbindung der neuen Schaltfläche
         self.label_save_button.clicked.connect(self.save_label)
         self.label_export_button.clicked.connect(self.export_labels)
-        self.dataset_creat_button.clicked.connect(self.creat_Label_and_dataset)
+        self.train_dataset.clicked.connect(self.creat_datset_and_train)
         self.import_Model_button.clicked.connect(self.model_laden)
-        self.train_dataset.clicked.connect(self.test_Modell)
+        self.test_dataset.clicked.connect(self.test_NModel)
 
     def perform_Test_label_action(self):
         """Führt die Labeling-Aktion basierend auf der Dropdown-Auswahl aus."""
@@ -359,8 +354,9 @@ class ImageViewerApp(QMainWindow):
 
 
     def model_laden(self):
-             # Modell laden
-        self.Modell = load_model("image_classifier.h5")
+        # Modell laden
+        model_path = os.path.join(self.output_Model_path, "image_classifier.h5")
+        self.Modell = load_model(model_path)
         QMessageBox.information(self, "Erfolg", "Modell erfolgreich geladen!")
 
 
@@ -416,9 +412,133 @@ class ImageViewerApp(QMainWindow):
         else:
             print(f"Datei {file_path} existiert nicht.")
             return {}
+        import os
+
+    def test_NModel(self):
+        # Teste das Modell
+        predictions = self.test_Model(
+        test_image_path=self.selected_Image_path,
+        img_shape=self.input_shape,
+        label_mapping_path=self.label_mapping_path,
+        output_predictions_path=self.output_predictions_path,
+        )
+        # Ausgabe der Vorhersagen
+        for prediction in predictions:
+            print(prediction)
+
+    def test_Model(self,
+        test_image_path,
+        img_shape,
+        label_mapping_path=None,
+        output_predictions_path=None,
+    ):
+        """
+        Testet ein trainiertes Modell mit neuen Testbildern.
+
+        Args:
+            model_path (str): Pfad zum gespeicherten Modell (.h5-Datei).
+            test_images_dir (str): Verzeichnis mit Testbildern.
+            img_shape (tuple): Zielgröße der Bilder (Höhe, Breite, Kanäle).
+            label_mapping_path (str, optional): Pfad zur Label-Mapping-Datei (JSON).
+            output_predictions_path (str, optional): Pfad zum Speichern der Vorhersagen (JSON).
+
+        Returns:
+            list: Liste von Vorhersagen mit Bildnamen und vorhergesagten Klassen.
+        """
+        # Lade das Modell
+
+        #model_path = os.path.join(self.output_Model_path, "image_classifier.h5")
+        #.Modell = load_model(model_path)
+        #print("Modell geladen.")
+
+        # Lade die Label-Mapping-Datei, falls angegeben
+        label_mapping = None
+        inverse_label_mapping = None
+        mapping_path = os.path.join(label_mapping_path, "label_mapping.json")
+        if mapping_path:
+            import json
+            with open(mapping_path, "r") as f:
+                label_mapping = json.load(f)
+                # Erstelle eine Umkehrung der Mapping-Tabelle (Zahl -> Name)
+                inverse_label_mapping = {v: k for k, v in label_mapping.items()}
+            print(f"Label-Mapping aus '{mapping_path}' geladen.")
+
+        predictions = []
+
+        try:
+            # Lade das Bild
+            img = cv2.imread(test_image_path, cv2.IMREAD_COLOR)
+            img_name = os.path.basename(test_image_path)
+            if img is None:
+                print(f"Bild '{img_name}' konnte nicht geladen werden.")
+                return
+
+            # Konvertiere zu RGB und skaliere auf die Zielgröße
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = transform.resize(img, img_shape, preserve_range=True) / 255.0
+
+            # Füge eine zusätzliche Dimension für die Batchgröße hinzu
+            img = np.expand_dims(img, axis=0)
+
+            # Mache eine Vorhersage
+            prediction = self.Modell.predict(img)
+            predicted_class = np.argmax(prediction)  # Index der höchsten Wahrscheinlichkeit
+            confidence = np.max(prediction)  # Wahrscheinlichkeit der vorhergesagten Klasse
+
+            # Übersetze in den Klassennamen, falls Mapping verfügbar ist
+            if inverse_label_mapping:
+                predicted_class_name = inverse_label_mapping[predicted_class]
+            else:
+                predicted_class_name = str(predicted_class)
+
+            predictions.append({
+                "image": img_name,
+                "predicted_class": predicted_class_name,
+                "confidence": float(confidence),
+            })
+
+            print(f"Bild '{img_name}': Vorhergesagte Klasse = {predicted_class_name}, "
+                f"Confidence = {confidence:.2f}")
+        except Exception as e:
+            print(f"Fehler beim Verarbeiten von '{img_name}': {e}")
+
+        # Speichere die Vorhersagen, falls ein Pfad angegeben ist
+        if output_predictions_path:
+            with open(output_predictions_path, "w") as f:
+                import json
+                json.dump(predictions, f, indent=4)
+            print(f"Vorhersagen gespeichert unter '{output_predictions_path}'.")
+
+        # Zeige das vorhergesagte Label als Overlay
+        self.overlay_image = self.add_overlay(self.original_image, predicted_class_name)
+
+         # Bildgröße überprüfen und skalieren
+        max_dim = 1000  # Maximale Breite oder Höhe
+        h, w = self.overlay_image.shape[:2]
+        if max(h, w) > max_dim:
+            scale = max_dim / max(h, w)
+            self.overlay_image = cv2.resize(self.overlay_image, (int(w * scale), int(h * scale)),
+                                             interpolation=cv2.INTER_AREA)
+        # Bild als QPixmap laden
+        try:
+            qimage = QImage(self.overlay_image.data, self.overlay_image.shape[1], self.overlay_image.shape[0],
+                            QImage.Format.Format_RGB888)
+            pixmap = QPixmap.fromImage(qimage)
+        except Exception as e:
+            print(f"Fehler beim Konvertieren des Bildes: {e}")
+            return
+        # Bild zur Szene hinzufügen
+        self.scene.clear()
+        self.pixmap_item = QGraphicsPixmapItem(pixmap)
+        self.scene.addItem(self.pixmap_item)
+        self.view.setScene(self.scene)
+        self.undo_stack.clear()  # Stack zurücksetzen
+
+        return predictions
 
 
-    def test_Modell(self):
+
+    def test_Modell_(self):
 
         # Label-Mapping
         label_map = {0: "Katze", 1: "Schmitterling"}  # Passe dies an dein Mapping an
@@ -486,149 +606,43 @@ class ImageViewerApp(QMainWindow):
         image = cv2.resize(image, image_size)
         image = np.expand_dims(image, axis=0)  # Batch-Dimension hinzufügen
         return image
-    def load_binary_data(self, file_path):
-        """Lädt die gespeicherten Daten aus einer Binärdatei."""
-        data = np.load(file_path, allow_pickle=True)
-        images = data["images"]
-        labels = data["labels"]
-        label_map = data["label_map"].item()  # Label-Mapping als Dictionary
-        return images, labels, label_map
 
-
-    def prepare_and_save_binary(self, json_file, output_file, image_size):
-        """Bereitet die Bilder und Labels vor und speichert sie als Binärdatei."""
-        with open(json_file, "r") as f:
-            labels_dict = json.load(f)
-
-        images = []
-        labels = []
-        label_map = {}
-        label_counter = 0
-
-        for file_name, label in labels_dict.items():
-            # Pfad des Bildes
-            file_path = os.path.join(self.images_path, file_name)  # Passe den Ordner an
-            image = cv2.imread(file_path)
-            if image is None:
-                print(f"Bild konnte nicht geladen werden: {file_path}")
-                continue
-
-            # BGR -> RGB und Größe anpassen
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            image = cv2.resize(image, image_size)
-            images.append(image)
-
-            # Label in Index umwandeln
-            if label not in label_map:
-                label_map[label] = label_counter
-                label_counter += 1
-            labels.append(label_map[label])
-
-        # Konvertiere in NumPy-Arrays
-        images = np.array(images)
-        labels = np.array(labels)
-
-        # Speichere die Daten als .npz-Datei
-        np.savez_compressed(output_file, images=images, labels=labels, label_map=label_map)
-        print(f"Datensatz gespeichert: {output_file}")
-        print(f"Label-Mapping: {label_map}")
-        return label_map
 
 
     #Creat Label And Dataset
-    def creat_Label_and_dataset(self):
-
-        # Funktion aufrufen
-        self.label_map = self.prepare_and_save_binary(self.json_file_path, self.output_file_path, self.image_size)
-
-        images, labels, label_map = self.load_binary_data(self.output_file_path)
-
-        # Sicherstellen, dass der Datensatz nicht leer ist
-        if len(images) == 0 or len(labels) == 0:
-            raise ValueError("Der Datensatz ist leer. Bitte prüfen Sie Ihre Eingabedaten.")
-
-        print(f"Bilder: {images.shape}, Labels: {labels.shape}")
-        print(f"Label-Mapping: {label_map}")
-
-        # Aufteilen der Daten
-        if len(images) < 2:
-            print("Zu wenige Daten für eine Aufteilung. Verwende alle Daten als Trainingsset.")
-            X_train, y_train = images, labels
-            X_val, y_val = [], []
-            X_test, y_test = [], []
-        else:
-            # Trainings- und Testdaten
-            X_train, X_temp, y_train, y_temp = train_test_split(images, labels, test_size=self.test_size, random_state=42)
-
-            # Validierungs- und Testdaten
-            if len(X_temp) < 2:
-                print("Zu wenige Daten für Validierung/Test. Alles wird als Test verwendet.")
-                X_val, y_val = [], []
-                X_test, y_test = X_temp, y_temp
-            else:
-                X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=self.validation_split, random_state=42)
-                # Debug-Ausgaben
-        print(f"Trainingsdaten: {len(X_train)}")
-        print(f"Validierungsdaten: {len(X_val)}")
-        print(f"Testdaten: {len(X_test)}")
-
-        # Anzahl der Klassen bestimmen
-        self.num_classes = len(np.unique(labels))  # Einzigartige Klassen aus den Labels ermitteln
-        print(f"Anzahl der Klassen: {self.num_classes}")
-
-                # Labels in One-Hot-Encoding umwandeln
-        y_train = to_categorical(y_train, num_classes=self.num_classes)
-        y_val = to_categorical(y_val, num_classes=self.num_classes)
-        y_test = to_categorical(y_test, num_classes=self.num_classes)
-
-       # Datenaufteilung
-        #X_train, X_temp, y_train, y_temp = train_test_split(images, labels, test_size=0.3, random_state=42)
-        #X_val, X_test, y_val, y_test = train_test_split(X_temp, y_temp, test_size=0.5, random_state=42)
-
-
-        train_dataset = self.create_tf_dataset(X_train, y_train, self.batch_size)
-        validation_dataset = self.create_tf_dataset(X_val, y_val, self.batch_size)
-        test_dataset = self.create_tf_dataset(X_test, y_test, self.batch_size)
-
-
-
-        # Modell erstellen
-
-       # model = self.create_model(input_shape=(self.image_size[0], self.image_size[1], 3), num_classes=num_classes)
-        # Modell erstellen mit build_model
-
-        model = self.build_model(
-            optimizer=Adam,
-            learning_rate=0.001,
-            filter_block1=32,
-            kernel_size_block1=3,
-            filter_block2=64,
-            kernel_size_block2=3,
-            filter_block3=128,
-            kernel_size_block3=3,
-            filter_block4=256,
-            kernel_size_block4=3,
-            dense_layer_size=128,
-            kernel_initializer=HeNormal(),
-            activation_cls=Activation("relu"),
-            dropout_rate=0.3,
-            use_batch_normalization=True,
-            use_dense=True,
-            use_global_pooling=True,
-            num_classes = self.num_classes
+    def creat_datset_and_train(self):
+        # Modell trainieren
+        history, model = train_multiclass_model(
+        json_file=self.json_file_path,
+        image_dir=self.images_path,
+        output_dataset_dir=self.output_Dataset_file_path,
+        output_model_dir=self.output_Model_path,
+        outputs_mapping_labeles=self.label_mapping_path,
+        input_shape=self.input_shape,
+        num_classes=self.num_classes,
+        build_model_fn=self.build_model,
+        optimizer=Adam,
+        learning_rate=0.001,
+        filter_block1=32,
+        kernel_size_block1=3,
+        filter_block2=64,
+        kernel_size_block2=3,
+        filter_block3=128,
+        kernel_size_block3=3,
+        filter_block4=256,
+        kernel_size_block4=3,
+        dense_layer_size=128,
+        kernel_initializer="glorot_uniform",
+        activation_cls=relu,
+        dropout_rate=0.5,
+        use_batch_normalization=True,
+        use_dense=True,
+        use_global_pooling=False,
+        batch_size=self.batch_size,
+        epochs=self.num_epochs,
         )
-        # Training
-        model.fit(train_dataset, epochs=self.num_epochs, validation_data=validation_dataset)
-
-        # Modell evaluieren
-        test_loss, test_accuracy = model.evaluate(test_dataset)
-        print(f"Testgenauigkeit: {test_accuracy:.2f}")
-
-        # Modell speichern
-        model.save("image_classifier.h5")
-        print("Modell gespeichert: image_classifier.h5")
-        # Modell laden
-        self.Modell = load_model("image_classifier.h5")
+        model_path = os.path.join(self.output_Model_path, "image_classifier.h5")
+        self.Modell = load_model(model_path)
 
         # 3. TensorFlow Dataset erstellen
     # TensorFlow-Datensätze
@@ -657,9 +671,6 @@ class ImageViewerApp(QMainWindow):
                     metrics=['accuracy'])
         return model
 
-    # Parameter
-    batch_size = 32
-    num_epochs = 10
 
     def build_model(self,
         optimizer,
@@ -681,7 +692,7 @@ class ImageViewerApp(QMainWindow):
         use_global_pooling: bool,
         num_classes: int
     ) -> Model:
-        input_img = Input(shape=( self.image_size_One,  self.image_size_One, 3))
+        input_img = Input(self.input_shape)
 
         x = Conv2D(
             filters=filter_block1,
@@ -784,7 +795,7 @@ class ImageViewerApp(QMainWindow):
                 x = BatchNormalization()(x)
             x = activation_cls(x)
         x = Dense(
-            units= num_classes,  # Beispiel mit 10 Klassen
+            units=num_classes,  # Beispiel mit 10 Klassen
             kernel_initializer=kernel_initializer,
         )(x)
         y_pred = Activation("softmax")(x)
