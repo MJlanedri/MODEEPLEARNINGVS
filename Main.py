@@ -4,9 +4,14 @@ import cv2
 import json
 import os
 import numpy as np
+import BinaryDatasetCreator
+from CustomGraphicsScene import CustomGraphicsScene
+from CustomTitleBar import CustomTitleBar
+from GraphicsView import GraphicsView
+from utils import loadStylesheet
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QPushButton, QWidget,
-    QFileDialog, QListWidget, QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QSlider, QLabel, QComboBox,
+    QFileDialog, QListWidget, QGraphicsView, QGraphicsPixmapItem, QSlider, QLabel, QComboBox,
     QListWidgetItem, QMessageBox, QInputDialog, QGroupBox, QGridLayout, QAbstractItemView
 )
 from PyQt6.QtGui import QPixmap, QImage, QPen, QIcon
@@ -25,216 +30,10 @@ from keras.initializers import HeNormal
 from keras.utils import to_categorical
 
 
-class CustomTitleBar(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.parent = parent
-
-        # Layout der Titelleiste
-        self.layout = QHBoxLayout(self)
-        self.layout.setContentsMargins(0, 0, 0, 0)
-
-        # Titel-Label
-        self.title_label = QLabel("Region Malen: Linie, Rechteck oder Kreis", self)
-        self.title_label.setStyleSheet("color: white; font-size: 14px; padding-left: 10px;")
-        self.title_label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        self.layout.addWidget(self.title_label)
-
-        # Buttons für Minimieren, Maximieren und Schließen
-        self.minimize_button = QPushButton("_")
-        self.minimize_button.setFixedSize(30, 30)
-        self.minimize_button.setStyleSheet("background-color: #1f1f1f; color: white; border: none;")
-        self.minimize_button.clicked.connect(self.minimize_window)
-        self.layout.addWidget(self.minimize_button)
-
-        self.maximize_button = QPushButton("[ ]")
-        self.maximize_button.setFixedSize(30, 30)
-        self.maximize_button.setStyleSheet("background-color: #1f1f1f; color: white; border: none;")
-        self.maximize_button.clicked.connect(self.maximize_window)
-        self.layout.addWidget(self.maximize_button)
-
-        self.close_button = QPushButton("X")
-        self.close_button.setFixedSize(30, 30)
-        self.close_button.setStyleSheet("background-color: #d32f2f; color: white; border: none;")
-        self.close_button.clicked.connect(self.close_window)
-        self.layout.addWidget(self.close_button)
-
-        # Hintergrundfarbe der Titelleiste
-        self.setStyleSheet("background-color: #121212;")
-
-        # Initialisiere Drag-Position
-        self.drag_position = None
-
-    def mousePressEvent(self, event):
-        """Ermöglicht das Ziehen des Fensters."""
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.drag_position = event.globalPosition().toPoint() - self.parent.frameGeometry().topLeft()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        """Aktualisiert die Fensterposition beim Ziehen."""
-        if self.drag_position and event.buttons() == Qt.MouseButton.LeftButton:
-            self.parent.move(event.globalPosition().toPoint() - self.drag_position)
-            event.accept()
-
-    def mouseReleaseEvent(self, event):
-        """Beendet das Ziehen des Fensters."""
-        self.drag_position = None
-        event.accept()
-
-    def minimize_window(self):
-        """Minimiert das Fenster."""
-        self.parent.showMinimized()
-
-    def maximize_window(self):
-        """Maximiert oder stellt das Fenster wieder her."""
-        if self.parent.isMaximized():
-            self.parent.showNormal()
-        else:
-            self.parent.showMaximized()
-
-    def close_window(self):
-        """Schließt das Fenster."""
-        self.parent.close()
-
-
-#from CustomTitleBar import CustomTitleBar
-dark_stylesheet = """
-QMainWindow {
-    background-color: #121212;  /* Dunkler Hintergrund für das Hauptfenster */
-    color: #ffffff;  /* Weißer Text */
-}
-
-QWidget {
-    background-color: #121212;
-    color: #ffffff;
-    font-size: 14px;
-    font-family: Arial, Helvetica, sans-serif;
-}
-
-QPushButton {
-    background-color: #1f1f1f;
-    border: 1px solid #3e3e3e;
-    border-radius: 4px;
-    color: #ffffff;
-    padding: 6px 12px;
-}
-QPushButton:hover {
-    background-color: #3e3e3e;
-    border: 1px solid #ffffff;
-}
-
-QPushButton:pressed {
-    background-color: #555555;
-}
-
-QComboBox {
-    background-color: #1f1f1f;
-    border: 1px solid #3e3e3e;
-    border-radius: 4px;
-    padding: 6px;
-    color: #ffffff;
-}
-
-QListWidget {
-    background-color: #1f1f1f;
-    border: 1px solid #3e3e3e;
-    border-radius: 4px;
-    padding: 4px;
-    color: #ffffff;
-}
-QListWidget::item:hover {
-    background-color: #3e3e3e;
-}
-QListWidget::item:selected {
-    background-color: #555555;
-}
-
-QGraphicsView {
-    border: 1px solid #3e3e3e;
-    background-color: #181818;
-}
-
-QSlider::groove:horizontal {
-    border: 1px solid #3e3e3e;
-    height: 8px;
-    background: #1f1f1f;
-}
-QSlider::handle:horizontal {
-    background: #555555;
-    border: 1px solid #3e3e3e;
-    width: 14px;
-    margin: -4px 0;
-    border-radius: 7px;
-}
-QSlider::handle:horizontal:hover {
-    background: #777777;
-}
-
-QLabel {
-    color: #ffffff;
-}
-
-QToolTip {
-    background-color: #222222;
-    color: #ffffff;
-    border: 1px solid #555555;
-}
-"""
-
-class CustomGraphicsScene(QGraphicsScene):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.parent_widget = parent  # Referenz zur ImageViewerApp
-
-    def mousePressEvent(self, event):
-        """Verarbeitet Mausereignisse in der Szene."""
-        if self.parent_widget:
-            self.parent_widget.on_scene_mouse_press(event)
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        """Verarbeitet Mausbewegungen in der Szene."""
-        if self.parent_widget:
-            self.parent_widget.on_scene_mouse_move(event)
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        """Verarbeitet das Loslassen der Maus in der Szene."""
-        if self.parent_widget:
-            self.parent_widget.on_scene_mouse_release(event)
-        super().mouseReleaseEvent(event)
-
-
-class GraphicsView(QGraphicsView):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.zoom_factor = 1.0
-        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)  # Standard auf Panning setzen
-
-    def wheelEvent(self, event):
-        """Zoom in/out mit dem Mausrad."""
-        zoom_in_factor = 1.1
-        zoom_out_factor = 0.9
-        old_zoom_factor = self.zoom_factor
-
-        # Bestimme Zoomrichtung
-        if event.angleDelta().y() > 0:
-            self.zoom_factor *= zoom_in_factor
-        else:
-            self.zoom_factor *= zoom_out_factor
-
-        # Skalieren
-        scale_factor = self.zoom_factor / old_zoom_factor
-        self.scale(scale_factor, scale_factor)
-
-
 class ImageViewerApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.stylesheet_filename = "qss/dark_theme.qss"
-        #self.loadStylesheet(self.stylesheet_filename)
-        #self.setWindowTitle("Region Malen: Linie, Rechteck oder Kreis")
+
         self.setGeometry(100, 100, 1200, 800)
 
         #titelbar
@@ -1691,7 +1490,9 @@ class ImageViewerApp(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     # Wende das Stylesheet an
-    app.setStyleSheet(dark_stylesheet)
+    #app.setStyleSheet(dark_stylesheet)
+
+    loadStylesheet("./qss./dark_stylesheet.qss")
 
     viewer = ImageViewerApp()
     viewer.show()
