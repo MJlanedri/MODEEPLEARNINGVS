@@ -1,0 +1,33 @@
+QMainWindow {
+    background-color: #121212;
+    color: #ffffff;
+}
+
+QWidget {
+    background-color: #121212;
+    color: #ffffff;
+}
+
+QPushButton {
+    background-color: #1f1f1f;
+    border: 1px solid #3e3e3e;
+    border-radius: 4px;
+    color: #ffffff;
+    padding: 6px 12px;
+}
+QPushButton:hover {
+    background-color: #3e3e3e;
+    border: 1px solid #ffffff;
+}
+
+QPushButton:pressed {
+    background-color: #555555;
+}
+
+QListWidget {
+    background-color: #1f1f1f;
+    border: 1px solid #3e3e3e;
+    border-radius: 4px;
+    padding: 4px;
+    color: #ffffff;
+}

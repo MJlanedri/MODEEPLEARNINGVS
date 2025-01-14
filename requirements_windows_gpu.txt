@@ -1,0 +1,18 @@
+# Libraries
+scikit-learn
+scipy
+scikit-image
+numpy==1.26.4
+matplotlib
+pandas
+opencv-python
+pyqt6
+xlrd
+openpyxl
+
+tensorflow==2.10.*
+keras==2.10.*
+tensorflow-datasets==4.8.*
+tensorcross>=1.0
+
+-r requirements-dev.txt
